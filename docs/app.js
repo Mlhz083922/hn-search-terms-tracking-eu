@@ -13,7 +13,7 @@ const state = {
   year: null,
   view: "overview",
   libraryPage: 1,
-  filter: { q: "", categories: [], tags: [], source: "", newWord: "", rankMin: "", rankMax: "", rankCustom: false },
+  filter: { q: "", categories: [], tags: [], source: "", newWord: "", ranked: "", rankMin: "", rankMax: "", rankCustom: false },
   sort: { key: "", dir: 1 },
   overviewCategories: [],
   overviewTags: [],
@@ -252,8 +252,8 @@ async function api(path, options = {}) {
   return fetchStateWithProgress();
 }
 
-const STATE_KEY = "hnStateCacheEU-9e521f47c7";
-const STATE_URL = "./data/state.json.gz?v=9e521f47c7";
+const STATE_KEY = "hnStateCacheEU-85921e8d7d";
+const STATE_URL = "./data/state.json.gz?v=85921e8d7d";
 
 function openStateDb() {
   return new Promise((resolve, reject) => {
@@ -797,6 +797,9 @@ function viewLibrary() {
     const isNewInWeek = k.firstSeenWeek === state.weekId;
     if (f.newWord === "yes" && !isNewInWeek) return false;
     if (f.newWord === "no" && isNewInWeek) return false;
+    // 上榜范围：词库是全量沉淀库，默认展示全部；可按当前数据周只看上榜/未上榜
+    if (f.ranked === "yes" && rankOf(k.id, state.weekId) == null) return false;
+    if (f.ranked === "no" && rankOf(k.id, state.weekId) != null) return false;
     const rmin = f.rankMin === "" || f.rankMin == null ? null : Number(f.rankMin);
     const rmax = f.rankMax === "" || f.rankMax == null ? null : Number(f.rankMax);
     if (rmin != null || rmax != null) {
@@ -826,6 +829,7 @@ function viewLibrary() {
   const pageSize = 100;
   const shown = rows.slice(0, state.libraryPage * pageSize);
   const missingTrans = state.db.keywords.filter((k) => k.active !== false && !String(k.translation || "").trim()).length;
+  const rankedCount = state.db.keywords.filter((k) => k.active !== false && rankOf(k.id, state.weekId) != null).length;
   const presetMatch =
     f.rankMin === "1" && [10000, 100000, 250000, 500000, 1000000].includes(Number(f.rankMax))
       ? String(f.rankMax)
@@ -837,7 +841,7 @@ function viewLibrary() {
       <div class="view-head">
         <div>
           <h2>关键词库</h2>
-          <p>${fmt(state.db.keywords.length)} 个女装泳装词 · 点击行查看周度历史（只读快照）</p>
+          <p>词库共 ${fmt(state.db.keywords.length)} 词（历史沉淀全量） · 本周上榜 ${fmt(rankedCount)} 词 · 点击行查看周度历史（只读快照）</p>
         </div>
         <div class="view-actions">
           <button class="btn" data-action="translate-missing" title="用德语词库 + 在线翻译，批量补齐没有中文文案的关键词">
@@ -854,6 +858,11 @@ function viewLibrary() {
             <option value="">全部词</option>
             <option value="yes" ${f.newWord === "yes" ? "selected" : ""}>新增词</option>
             <option value="no" ${f.newWord === "no" ? "selected" : ""}>非新增词</option>
+          </select>
+          <select class="select" id="lib-ranked" title="词库是全量沉淀库；可按当前数据周只看当周 ABA 上榜词">
+            <option value="">全部词库</option>
+            <option value="yes" ${f.ranked === "yes" ? "selected" : ""}>仅当周上榜</option>
+            <option value="no" ${f.ranked === "no" ? "selected" : ""}>当周未上榜</option>
           </select>
           <div class="rank-filter" title="按当周 ABA 排名区间筛选">
             <select class="select" id="lib-rank-preset">
@@ -1212,7 +1221,7 @@ function bindViewEvents(root) {
       else if (action === "resume-draft") resumeDraft(id);
       else if (action === "goto-xiyou") { state.view = "xiyou"; render(); }
       else if (action === "load-more") { state.libraryPage += 1; render(); }
-      else if (action === "reset-filters") { state.filter = { q: "", categories: [], tags: [], source: "", newWord: "", rankMin: "", rankMax: "", rankCustom: false }; state.libraryPage = 1; render(); }
+      else if (action === "reset-filters") { state.filter = { q: "", categories: [], tags: [], source: "", newWord: "", ranked: "", rankMin: "", rankMax: "", rankCustom: false }; state.libraryPage = 1; render(); }
       else if (action === "translate-missing") translateMissing();
       else if (action === "pick-file") $("#file-input").click();
       else if (action === "parse-file") parseFile();
@@ -1344,6 +1353,13 @@ function bindViewEvents(root) {
   const newWordEl = root.querySelector("#lib-new-word");
   if (newWordEl) newWordEl.addEventListener("change", () => {
     state.filter.newWord = newWordEl.value;
+    state.libraryPage = 1;
+    render();
+  });
+
+  const rankedEl = root.querySelector("#lib-ranked");
+  if (rankedEl) rankedEl.addEventListener("change", () => {
+    state.filter.ranked = rankedEl.value;
     state.libraryPage = 1;
     render();
   });

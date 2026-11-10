@@ -340,8 +340,8 @@ patchedJs = patchedJs
   )
   .replace(/<button class="btn" data-action="goto-(update|xiyou)">[^<]*<\/button>\n?/g, "")
   .replace(
-    "<p>${fmt(state.db.keywords.length)} 个女装泳装词 · 点击行查看周度历史与编辑</p>",
-    "<p>${fmt(state.db.keywords.length)} 个女装泳装词 · 点击行查看周度历史（只读快照）</p>"
+    "<p>词库共 ${fmt(state.db.keywords.length)} 词（历史沉淀全量） · 本周上榜 ${fmt(rankedCount)} 词 · 点击行查看周度历史与编辑</p>",
+    "<p>词库共 ${fmt(state.db.keywords.length)} 词（历史沉淀全量） · 本周上榜 ${fmt(rankedCount)} 词 · 点击行查看周度历史（只读快照）</p>"
   )
   .replace(
     `          <button class="btn primary" data-action="add-keyword"><i data-lucide="plus"></i>手动添加</button>
