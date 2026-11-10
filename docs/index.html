@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>HN Search Terms Tracking EU · 女装泳装热搜词追踪（DE）</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=9e521f47c7">
 </head>
 <body>
   <div id="auth-gate" class="auth-gate">
@@ -66,7 +66,39 @@
   <div id="modal-root"></div>
   <div id="toast-root"></div>
 
-  <script src="vendor/lucide.min.js"></script>
-  <script src="app.js"></script>
+  <script src="vendor/lucide.min.js?v=9e521f47c7"></script>
+  <script src="app.js?v=9e521f47c7"></script>
+
+<script>
+(function () {
+  var BUILD = "9e521f47c7";
+  var lastCheck = 0;
+  function check() {
+    var now = Date.now();
+    if (now - lastCheck < 60000) return;
+    lastCheck = now;
+    fetch("./version.json?ts=" + now, { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (v) {
+        if (!v || !v.version || v.version === BUILD) return;
+        var key = "hnVerRetry:" + v.version;
+        if (sessionStorage.getItem(key)) {
+          var el = document.getElementById("load-status");
+          if (el) { el.hidden = false; el.textContent = "已发布新版本（" + v.version + "），请按 Cmd+Shift+R 强制刷新"; }
+          return;
+        }
+        sessionStorage.setItem(key, "1");
+        location.replace(location.pathname + "?v=" + v.version + location.hash);
+      })
+      .catch(function () {});
+  }
+  try {
+    check();
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") check();
+    });
+  } catch (e) {}
+})();
+</script>
 </body>
 </html>

@@ -78,8 +78,25 @@ function patch(source, needle, replacement, label) {
 }
 
 const css = await fs.readFile(path.join(appDir, "styles.css"), "utf8");
+const js = await fs.readFile(path.join(appDir, "app.js"), "utf8");
 await fs.writeFile(path.join(siteDir, "styles.css"), css + GATE_CSS, "utf8");
 await fs.copyFile(path.join(appDir, "vendor", "lucide.min.js"), path.join(vendorDir, "lucide.min.js"));
+
+const db = await loadDB({ force: true, dir: deDataDir });
+const stateJson = JSON.stringify(db);
+const stateGz = gzipSync(stateJson);
+const stateVersion = createHash("sha256").update(stateGz).digest("hex").slice(0, 12);
+await fs.writeFile(path.join(dataDir, "state.json.gz"), stateGz);
+await fs.rm(path.join(dataDir, "state.json"), { force: true });
+
+// 资源版本号：源码(js/css) + 数据快照三者共同决定，任何一处变化都会换新 URL，
+// 从而绕开 GitHub Pages 的 10 分钟强缓存（Cache-Control: max-age=600）。
+const assetVersion = createHash("sha256")
+  .update(js)
+  .update(css)
+  .update(stateGz)
+  .digest("hex")
+  .slice(0, 10);
 
 const html = await fs.readFile(path.join(appDir, "index.html"), "utf8");
 let patchedHtml = html
@@ -95,16 +112,61 @@ let patchedHtml = html
   )
   .replace(/\s*<button id="btn-update-team-link"[\s\S]*?<\/button>/, "");
 patchedHtml = patchedHtml.replace("<body>", "<body>" + GATE_HTML);
+// 所有静态资源带版本号，避免浏览器沿用旧的 app.js / styles.css
+patchedHtml = patchedHtml
+  .replace('href="styles.css"', `href="styles.css?v=${assetVersion}"`)
+  .replace('src="vendor/lucide.min.js"', `src="vendor/lucide.min.js?v=${assetVersion}"`)
+  .replace('src="app.js"', `src="app.js?v=${assetVersion}"`);
+// 版本守卫：HTML 本身被缓存时（最长 10 分钟），用最新 version.json 比对，
+// 发现新版本就用带版本号的 URL 重载，一次性拿到全新 HTML + 资源 + 数据。
+const VERSION_GUARD = `
+<script>
+(function () {
+  var BUILD = "${assetVersion}";
+  var lastCheck = 0;
+  function check() {
+    var now = Date.now();
+    if (now - lastCheck < 60000) return;
+    lastCheck = now;
+    fetch("./version.json?ts=" + now, { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (v) {
+        if (!v || !v.version || v.version === BUILD) return;
+        var key = "hnVerRetry:" + v.version;
+        if (sessionStorage.getItem(key)) {
+          var el = document.getElementById("load-status");
+          if (el) { el.hidden = false; el.textContent = "已发布新版本（" + v.version + "），请按 Cmd+Shift+R 强制刷新"; }
+          return;
+        }
+        sessionStorage.setItem(key, "1");
+        location.replace(location.pathname + "?v=" + v.version + location.hash);
+      })
+      .catch(function () {});
+  }
+  try {
+    check();
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") check();
+    });
+  } catch (e) {}
+})();
+</script>`;
+patchedHtml = patchedHtml.replace("</body>", VERSION_GUARD + "\n</body>");
 await fs.writeFile(path.join(siteDir, "index.html"), patchedHtml, "utf8");
 
-const db = await loadDB({ force: true, dir: deDataDir });
-const stateJson = JSON.stringify(db);
-const stateGz = gzipSync(stateJson);
-const stateVersion = createHash("sha256").update(stateGz).digest("hex").slice(0, 12);
-await fs.writeFile(path.join(dataDir, "state.json.gz"), stateGz);
-await fs.rm(path.join(dataDir, "state.json"), { force: true });
+await fs.writeFile(
+  path.join(siteDir, "version.json"),
+  JSON.stringify({
+    version: assetVersion,
+    stateVersion,
+    builtAt: new Date().toISOString(),
+    keywords: db.keywords.length,
+    weeks: Object.keys(db.weeks).length,
+    latestWeek: Object.keys(db.weeks).sort().at(-1) || null,
+  }, null, 2) + "\n",
+  "utf8"
+);
 
-const js = await fs.readFile(path.join(appDir, "app.js"), "utf8");
 let patchedJs = js;
 patchedJs = patch(
   patchedJs,
@@ -130,7 +192,8 @@ async function api(path, options = {}) {
   return fetchStateWithProgress();
 }
 
-const STATE_KEY = "hnStateCacheEU-${stateVersion}";
+const STATE_KEY = "hnStateCacheEU-${assetVersion}";
+const STATE_URL = "./data/state.json.gz?v=${assetVersion}";
 
 function openStateDb() {
   return new Promise((resolve, reject) => {
@@ -167,6 +230,23 @@ async function stateCacheSet(value) {
   } catch {}
 }
 
+// 清掉历史版本快照，避免 IndexedDB 无限膨胀
+async function stateCachePrune() {
+  try {
+    const db = await openStateDb();
+    await new Promise((resolve) => {
+      const tx = db.transaction("state", "readwrite");
+      const store = tx.objectStore("state");
+      const req = store.getAllKeys();
+      req.onsuccess = () => {
+        for (const k of req.result || []) if (k !== STATE_KEY) store.delete(k);
+        resolve();
+      };
+      req.onerror = () => resolve();
+    });
+  } catch {}
+}
+
 function showLoadProgress(text) {
   const el = document.querySelector("#load-status");
   if (!el) return;
@@ -175,7 +255,7 @@ function showLoadProgress(text) {
 }
 
 async function fetchStateWithProgress() {
-  const resp = await fetch("./data/state.json.gz");
+  const resp = await fetch(STATE_URL, { cache: "no-store" });
   if (!resp.ok) throw new Error(\`数据快照加载失败 \${resp.status}\`);
   const enc = (resp.headers.get("Content-Encoding") || "").toLowerCase();
   if (enc.includes("gzip")) return resp.json();
@@ -224,6 +304,7 @@ patchedJs = patch(
   state.db = await fetchStateWithProgress();
   applyDefaults();
   await stateCacheSet({ db: state.db, ts: Date.now() });
+  void stateCachePrune();
 }
 
 function applyDefaults() {
@@ -397,4 +478,5 @@ await fs.writeFile(path.join(siteDir, "app.js"), patchedJs, "utf8");
 
 console.log("EU (DE) read-only site built at", siteDir);
 console.log("keywords:", db.keywords.length, "weeks:", Object.keys(db.weeks).length);
+console.log("asset version:", assetVersion, "| state version:", stateVersion);
 console.log("团队共享链接: https://mlhz083922.github.io/hn-search-terms-tracking-eu/");

@@ -252,7 +252,8 @@ async function api(path, options = {}) {
   return fetchStateWithProgress();
 }
 
-const STATE_KEY = "hnStateCacheEU-b74ad9ab1289";
+const STATE_KEY = "hnStateCacheEU-9e521f47c7";
+const STATE_URL = "./data/state.json.gz?v=9e521f47c7";
 
 function openStateDb() {
   return new Promise((resolve, reject) => {
@@ -289,6 +290,23 @@ async function stateCacheSet(value) {
   } catch {}
 }
 
+// 清掉历史版本快照，避免 IndexedDB 无限膨胀
+async function stateCachePrune() {
+  try {
+    const db = await openStateDb();
+    await new Promise((resolve) => {
+      const tx = db.transaction("state", "readwrite");
+      const store = tx.objectStore("state");
+      const req = store.getAllKeys();
+      req.onsuccess = () => {
+        for (const k of req.result || []) if (k !== STATE_KEY) store.delete(k);
+        resolve();
+      };
+      req.onerror = () => resolve();
+    });
+  } catch {}
+}
+
 function showLoadProgress(text) {
   const el = document.querySelector("#load-status");
   if (!el) return;
@@ -297,7 +315,7 @@ function showLoadProgress(text) {
 }
 
 async function fetchStateWithProgress() {
-  const resp = await fetch("./data/state.json.gz");
+  const resp = await fetch(STATE_URL, { cache: "no-store" });
   if (!resp.ok) throw new Error(`数据快照加载失败 ${resp.status}`);
   const enc = (resp.headers.get("Content-Encoding") || "").toLowerCase();
   if (enc.includes("gzip")) return resp.json();
@@ -350,6 +368,7 @@ async function loadDB() {
   state.db = await fetchStateWithProgress();
   applyDefaults();
   await stateCacheSet({ db: state.db, ts: Date.now() });
+  void stateCachePrune();
 }
 
 function applyDefaults() {
