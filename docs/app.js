@@ -13,12 +13,10 @@ const state = {
   year: null,
   view: "overview",
   libraryPage: 1,
-  filter: { q: "", categories: [], tags: [], source: "", brands: [], rankMin: "", rankMax: "", rankCustom: false, weeklyNew: false },
+  filter: { q: "", categories: [], tags: [], source: "", newWord: "", rankMin: "", rankMax: "", rankCustom: false },
   sort: { key: "", dir: 1 },
-  overviewBrands: [],
   overviewCategories: [],
   overviewTags: [],
-  overviewWeeklyNew: false,
   volFromWeek: null,
   volToWeek: null,
   moverBaseWeek: null,
@@ -58,12 +56,6 @@ function focusBrandSet() {
   return new Set(
     (state.db.settings?.focusBrands || []).map((b) => String(b).toLowerCase().trim())
   );
-}
-
-function brandMatches(k, brands) {
-  const bl = String(k.brand || "").toLowerCase().trim();
-  if (!brands || !brands.length) return true;
-  return brands.some((b) => bl === String(b).toLowerCase().trim());
 }
 
 function multiFilterHtml(label, options, selected, target) {
@@ -260,7 +252,7 @@ async function api(path, options = {}) {
   return fetchStateWithProgress();
 }
 
-const STATE_KEY = "hnStateCacheEU-ad65ff95b4de";
+const STATE_KEY = "hnStateCacheEU-b74ad9ab1289";
 
 function openStateDb() {
   return new Promise((resolve, reject) => {
@@ -484,14 +476,11 @@ function viewOverview() {
   const focusSet = new Set(
     (state.db.settings?.focusBrands || []).map((b) => String(b).toLowerCase().trim())
   );
-  const focusBrands = state.db.settings?.focusBrands || [];
   const cats = sortCategories([...new Set(active.map((k) => k.categoryWord).filter(Boolean))]);
   const tagVals = tagValuesFrom(active);
   const filtered = active.filter((k) =>
-    brandMatches(k, state.overviewBrands) &&
     exactMatches(k.categoryWord, state.overviewCategories) &&
-    tagsMatch(k, state.overviewTags) &&
-    (!state.overviewWeeklyNew || k.firstSeenWeek === wid)
+    tagsMatch(k, state.overviewTags)
   );
   const focusCount = filtered.filter((k) => focusSet.has(String(k.brand || "").toLowerCase().trim())).length;
   const ranked = filtered.filter((k) => rankOf(k.id, wid) != null);
@@ -535,7 +524,7 @@ function viewOverview() {
     { label: "词库词数", value: fmt(filtered.length), icon: "database", extra: `共 ${state.db.keywords.length} 条词库 · 白名单品牌 ${focusCount} 词` },
     { label: "当周上榜", value: fmt(ranked.length), icon: "trending-up", extra: rankedPrev == null ? "" : ranked.length - rankedPrev > 0 ? `<span class="up">+${ranked.length - rankedPrev}</span> 较上周变化` : ranked.length - rankedPrev < 0 ? `<span class="down">${ranked.length - rankedPrev}</span> 较上周变化` : "与上周持平" },
     { label: "搜索量已匹配", value: fmt(volMatched), icon: "search", extra: weekHasVol ? `覆盖率 ${filtered.length ? Math.round((volMatched / filtered.length) * 100) : 0}%` : volState === "none" ? "西柚已查询，当周报告无搜索量数据" : "西柚数据待更新（预计周三）" },
-    { label: "本周新增", value: fmt(newlyAdded), icon: "plus-circle", extra: state.overviewWeeklyNew ? "已筛选仅看当周新增词" : newWeeks > 0 ? "当前周后仍有新周期" : "当前为最新数据周" },
+    { label: "本周新增", value: fmt(newlyAdded), icon: "plus-circle", extra: newWeeks > 0 ? "当前周后仍有新周期" : "当前为最新数据周" },
   ];
 
   return `
@@ -546,12 +535,8 @@ function viewOverview() {
           <p>女装泳装类目周度 ABA 排名与搜索量变化 · 白名单品牌 ${fmt(focusCount)} 词 · ${volState === "has" ? (state.db.weeks[wid]?.volumeSource === "xiyou" ? "搜索量来自西柚" : "搜索量来自人工登记") : volState === "none" ? "西柚已查询，当周报告无搜索量数据" : "搜索量待西柚更新"}</p>
         </div>
         <div class="view-actions">
-          ${multiFilterHtml("品牌", focusBrands, state.overviewBrands, "overview-brands")}
           ${multiFilterHtml("类目词", cats, state.overviewCategories, "overview-cats")}
           ${multiFilterHtml("属性标签", tagVals, state.overviewTags, "overview-tags")}
-          <button class="btn ${state.overviewWeeklyNew ? "active" : ""}" data-action="toggle-weekly-new" title="仅显示当周首次出现的新增词">
-            <i data-lucide="filter"></i>周度新增
-          </button>
         </div>
       </div>
       <div class="grid-stats">
@@ -789,8 +774,10 @@ function viewLibrary() {
     if (!exactMatches(k.categoryWord, f.categories)) return false;
     if (!tagsMatch(k, f.tags)) return false;
     if (f.source && k.source !== f.source) return false;
-    if (f.weeklyNew && k.firstSeenWeek !== state.weekId) return false;
-    if (!brandMatches(k, f.brands)) return false;
+    // 是否新增词：以当前所选数据周为准（首次出现在该周的词 = 新增词）
+    const isNewInWeek = k.firstSeenWeek === state.weekId;
+    if (f.newWord === "yes" && !isNewInWeek) return false;
+    if (f.newWord === "no" && isNewInWeek) return false;
     const rmin = f.rankMin === "" || f.rankMin == null ? null : Number(f.rankMin);
     const rmax = f.rankMax === "" || f.rankMax == null ? null : Number(f.rankMax);
     if (rmin != null || rmax != null) {
@@ -844,7 +831,11 @@ function viewLibrary() {
           <div class="search"><i data-lucide="search"></i><input id="lib-q" placeholder="搜索关键词、翻译、品牌..." value="${esc(f.q)}"></div>
           ${multiFilterHtml("类目词", cats, f.categories, "library-cats")}
           ${multiFilterHtml("属性标签", tagVals, f.tags, "library-tags")}
-          ${multiFilterHtml("品牌", state.db.settings?.focusBrands || [], f.brands, "library")}
+          <select class="select" id="lib-new-word" title="按当前数据周筛选新增词（可与类目词、属性标签等同时使用）">
+            <option value="">全部词</option>
+            <option value="yes" ${f.newWord === "yes" ? "selected" : ""}>新增词</option>
+            <option value="no" ${f.newWord === "no" ? "selected" : ""}>非新增词</option>
+          </select>
           <div class="rank-filter" title="按当周 ABA 排名区间筛选">
             <select class="select" id="lib-rank-preset">
               <option value="">全部排名</option>
@@ -863,9 +854,8 @@ function viewLibrary() {
           </div>
           <select class="select" id="lib-state">
             <option value="">全部状态</option>
-            <option value="manual" ${f.source === "manual" && !f.weeklyNew ? "selected" : ""}>手动登记</option>
-            <option value="weekly" ${f.source === "weekly" && !f.weeklyNew ? "selected" : ""}>周度导入</option>
-            <option value="new" ${f.weeklyNew ? "selected" : ""}>仅当周新增</option>
+            <option value="manual" ${f.source === "manual" ? "selected" : ""}>手动登记</option>
+            <option value="weekly" ${f.source === "weekly" ? "selected" : ""}>周度导入</option>
           </select>
           <div class="spacer"></div>
           <button class="btn" data-action="reset-filters"><i data-lucide="x"></i>清空</button>
@@ -1127,7 +1117,7 @@ function viewXiyou() {
           <p>批量查询当周关键词搜索量</p>
         </div>
         <div class="view-actions">
-          <button class="btn primary" data-action="xiyou-match-all"><i data-lucide="layers"></i>一键匹配全部历史周</button>
+          <button class="btn primary" data-action="xiyou-backfill" title="用西柚 ABA 周趋势接口，一次性补齐所有历史周的搜索量与排名（不影响每周自动匹配）"><i data-lucide="history"></i>补齐历史周搜索量</button>
           <button class="btn" data-action="xiyou-export" data-week="${wid}"><i data-lucide="download"></i>导出全部待匹配词</button>
         </div>
       </div>
@@ -1202,9 +1192,8 @@ function bindViewEvents(root) {
       else if (action === "goto-update") { state.view = "update"; render(); }
       else if (action === "resume-draft") resumeDraft(id);
       else if (action === "goto-xiyou") { state.view = "xiyou"; render(); }
-      else if (action === "toggle-weekly-new") { state.overviewWeeklyNew = !state.overviewWeeklyNew; render(); }
       else if (action === "load-more") { state.libraryPage += 1; render(); }
-      else if (action === "reset-filters") { state.filter = { q: "", categories: [], tags: [], source: "", brands: [], rankMin: "", rankMax: "", rankCustom: false, weeklyNew: false }; state.libraryPage = 1; render(); }
+      else if (action === "reset-filters") { state.filter = { q: "", categories: [], tags: [], source: "", newWord: "", rankMin: "", rankMax: "", rankCustom: false }; state.libraryPage = 1; render(); }
       else if (action === "translate-missing") translateMissing();
       else if (action === "pick-file") $("#file-input").click();
       else if (action === "parse-file") parseFile();
@@ -1220,7 +1209,7 @@ function bindViewEvents(root) {
       else if (action === "commit-draft") commitDraft();
       else if (action === "xiyou-export") xiyouExport(week);
       else if (action === "xiyou-auto-match") xiyouAutoMatch(week);
-      else if (action === "xiyou-match-all") xiyouMatchAllHistory();
+      else if (action === "xiyou-backfill") xiyouBackfillHistory();
       else if (action === "draft-auto-match") xiyouDraftAutoMatch();
       else if (action === "xiyou-pending") xiyouPendingToggle(week);
       else if (action === "manual-volume-pick") $("#manual-volume-file")?.click();
@@ -1287,12 +1276,10 @@ function bindViewEvents(root) {
       const wrap = btn.closest("[data-multi]");
       if (!wrap) return;
       const vals = [...wrap.querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value);
-      if (wrap.dataset.target === "overview-brands") state.overviewBrands = vals;
-      else if (wrap.dataset.target === "overview-cats") state.overviewCategories = vals;
+      if (wrap.dataset.target === "overview-cats") state.overviewCategories = vals;
       else if (wrap.dataset.target === "overview-tags") state.overviewTags = vals;
       else if (wrap.dataset.target === "library-cats") state.filter.categories = vals;
       else if (wrap.dataset.target === "library-tags") state.filter.tags = vals;
-      else state.filter.brands = vals;
       state.libraryPage = 1;
       render();
     });
@@ -1330,14 +1317,14 @@ function bindViewEvents(root) {
   }
   const stateEl = root.querySelector("#lib-state");
   if (stateEl) stateEl.addEventListener("change", () => {
-    const v = stateEl.value;
-    if (v === "new") {
-      state.filter.weeklyNew = true;
-      state.filter.source = "";
-    } else {
-      state.filter.weeklyNew = false;
-      state.filter.source = v;
-    }
+    state.filter.source = stateEl.value;
+    state.libraryPage = 1;
+    render();
+  });
+
+  const newWordEl = root.querySelector("#lib-new-word");
+  if (newWordEl) newWordEl.addEventListener("change", () => {
+    state.filter.newWord = newWordEl.value;
     state.libraryPage = 1;
     render();
   });
@@ -2113,69 +2100,70 @@ async function xiyouDraftAutoMatch() {
   }
 }
 
-// 一键匹配全部历史周：从旧到新逐周串行调西柚，额度不足自动暂停（换码后可继续）
-async function xiyouMatchAllHistory() {
-  const jobs = [];
-  for (const wid of weekIds()) {
-    const pend = state.db.keywords.filter(
-      (k) => k.active !== false && state.db.rankings[k.id]?.[wid] != null &&
-        !state.db.volumes[k.id]?.[wid] && !state.db.xiyou[k.id]?.[wid]
-    );
-    if (pend.length) jobs.push({ wid, total: pend.length });
-  }
-  if (!jobs.length) {
-    toast("历史每周没有待匹配的词", "success");
+// 一次性补齐历史周搜索量：走西柚 ABA 周趋势接口（get_keyword_aba_trends），
+// 不改动每周新增周期的自动匹配流程（那仍用 get_keyword_info 取当周数据）。
+async function xiyouBackfillHistory() {
+  const box = () => document.querySelector("#xiyou-auto-status");
+  let pv;
+  try {
+    pv = await api("/api/xiyou/backfill-preview");
+  } catch (err) {
+    toast(err.message, "error");
     return;
   }
-  const totalWords = jobs.reduce((s, j) => s + j.total, 0);
-  if (!confirm(`将对 ${jobs.length} 个历史周共 ${fmt(totalWords)} 个待匹配词逐一查询西柚（约消耗 ${fmt(totalWords)} 积分），确认开始？`)) return;
-  const box = () => document.querySelector("#xiyou-auto-status");
-  let doneWords = 0;
-  let cost = 0;
-  for (let i = 0; i < jobs.length; i++) {
-    const { wid, total } = jobs[i];
-    let job;
+  if (!pv.weekCount) {
+    toast("所有周都已有搜索量，无需回填", "success");
+    return;
+  }
+  const ok = confirm(
+    `将用西柚 ABA 周趋势补齐 ${pv.weekCount} 个历史周（${pv.firstWeekLabel} ~ ${pv.lastWeekLabel}）共 ${fmt(pv.keywordCount)} 个词的搜索量。\n\n` +
+    `预计 ${fmt(pv.calls)} 次西柚调用（约 ${fmt(pv.calls)} 积分），过程约需几分钟。确认开始？`
+  );
+  if (!ok) return;
+  if (box()) box().innerHTML = `<div class="chip"><b>正在启动</b> 准备查询西柚 ABA 周趋势…</div>`;
+  let job;
+  try {
+    job = await api("/api/xiyou/backfill-history", { method: "POST", body: JSON.stringify({}) });
+  } catch (err) {
+    if (box()) box().innerHTML = `<div class="chip red"><b>启动失败</b> ${esc(err.message)}</div>`;
+    toast(err.message, "error");
+    return;
+  }
+  if (job?.skipped) {
+    if (box()) box().innerHTML = `<div class="chip green"><b>无需回填</b> ${esc(job.reason || "所有周都已有搜索量")}</div>`;
+    return;
+  }
+  let cur;
+  while (true) {
     try {
-      job = await api("/api/xiyou/auto-match", { method: "POST", body: JSON.stringify({ weekId: wid, batchSize: 200 }) });
-    } catch (err) {
-      if (box()) box().innerHTML = `<div class="chip red"><b>启动失败</b> ${esc(err.message)}</div>`;
-      return;
-    }
-    let cur;
-    while (true) {
       cur = await api(`/api/xiyou/jobs/${job.id}`);
-      const done = jobs.slice(0, i).reduce((s, j) => s + j.total, 0) + (cur.done || 0);
-      if (box()) {
-        box().innerHTML = `
-          <div class="chip"><b>第 ${i + 1}/${jobs.length} 周</b> ${esc(wid)} · 总进度 ${fmt(done)}/${fmt(totalWords)} 词 · 已匹配 ${fmt(cur.matched || 0)} · 消耗 ${fmt(cost + (cur.costCredits || 0))} 积分</div>
-          <div class="progress"><i style="width:${totalWords ? Math.round((done / totalWords) * 100) : 100}%"></i></div>`;
-      }
-      if (cur.status !== "running") break;
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-    doneWords += cur.done || 0;
-    cost += cur.costCredits || 0;
-    if (cur.stopped === "credits") {
-      await loadDB();
-      render();
-      const b = () => document.querySelector("#xiyou-auto-status");
-      if (b()) b().innerHTML = `<div class="chip amber"><b>西柚额度不足已暂停</b> 已处理 ${fmt(doneWords)}/${fmt(totalWords)} 词，消耗 ${fmt(cost)} 积分；到「MCP&API」换码后再点本按钮继续</div>`;
-      toast("西柚额度不足，批量匹配已暂停", "error");
+    } catch (err) {
+      if (box()) box().innerHTML = `<div class="chip red"><b>查询进度失败</b> ${esc(err.message)}</div>`;
       return;
     }
-    if (cur.status === "error") {
-      await loadDB();
-      render();
-      const b = () => document.querySelector("#xiyou-auto-status");
-      if (b()) b().innerHTML = `<div class="chip red"><b>${esc(wid)} 匹配失败</b> ${esc(cur.error || "未知错误")}，已停止；可重新点击继续</div>`;
-      return;
+    if (box()) {
+      box().innerHTML = `
+        <div class="chip"><b>历史周回填中</b> 词次 ${fmt(cur.done || 0)}/${fmt(cur.total || 0)} · 已补 ${fmt(cur.weeksFilled || 0)} 条周数据 · 调用 ${fmt(cur.callsDone || 0)}/${fmt(cur.callsTotal || 0)} · 消耗 ${fmt(cur.costCredits || 0)} 积分</div>
+        <div class="progress"><i style="width:${cur.total ? Math.round(((cur.done || 0) / cur.total) * 100) : 100}%"></i></div>`;
     }
+    if (cur.status !== "running") break;
+    await new Promise((r) => setTimeout(r, 2000));
   }
   await loadDB();
   render();
-  toast(`历史周批量匹配完成：${fmt(doneWords)} 词，消耗 ${fmt(cost)} 积分`, "success");
   const b = () => document.querySelector("#xiyou-auto-status");
-  if (b()) b().innerHTML = `<div class="chip green"><b>全部历史周匹配完成</b> 共 ${fmt(doneWords)} 词 · 消耗 ${fmt(cost)} 积分</div>`;
+  if (cur.stopped === "credits") {
+    if (b()) b().innerHTML = `<div class="chip amber"><b>西柚额度不足已暂停</b> 已补 ${fmt(cur.weeksFilled || 0)} 条周数据；到「MCP&API」换码后可再次点击继续</div>`;
+    toast("西柚额度不足，回填已暂停", "error");
+    return;
+  }
+  if (cur.status === "error") {
+    if (b()) b().innerHTML = `<div class="chip red"><b>回填失败</b> ${esc(cur.error || "未知错误")}</div>`;
+    toast("历史周回填失败", "error");
+    return;
+  }
+  if (b()) b().innerHTML = `<div class="chip green"><b>历史周回填完成</b> 共补 ${fmt(cur.weeksFilled || 0)} 条周数据 · 调用 ${fmt(cur.callsDone || 0)} 次 · 消耗 ${fmt(cur.costCredits || 0)} 积分</div>`;
+  toast(`历史周搜索量已补齐：${fmt(cur.weeksFilled || 0)} 条周数据`, "success");
 }
 
 async function deleteKeyword(id) {
