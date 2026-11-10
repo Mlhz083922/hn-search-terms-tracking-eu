@@ -252,8 +252,8 @@ async function api(path, options = {}) {
   return fetchStateWithProgress();
 }
 
-const STATE_KEY = "hnStateCacheEU-85921e8d7d";
-const STATE_URL = "./data/state.json.gz?v=85921e8d7d";
+const STATE_KEY = "hnStateCacheEU-d7a2cbbb1a";
+const STATE_URL = "./data/state.json.gz?v=d7a2cbbb1a";
 
 function openStateDb() {
   return new Promise((resolve, reject) => {
@@ -587,7 +587,7 @@ function viewOverview() {
                   return `<tr class="clickable" data-action="open-keyword" data-id="${k.id}">
                     <td>${rankBadge(rank)}</td>
                     <td class="kw-cell"><div class="main">${esc(k.keyword)}</div><div class="sub">${k.source === "weekly" ? '<span class="tag">周度导入</span>' : ""}</div></td>
-                    <td class="tr-cell">${k.translation ? esc(k.translation) : '<span class="muted sm">待翻译</span>'}</td>
+                    <td class="tr-cell">${esc(k.translation || k.keyword)}</td>
                     <td>${esc(k.categoryWord || "—")}</td>
                     <td>${tagsChipsHtml(k)}</td>
                     <td class="num"><strong>${fmt(v)}</strong></td>
@@ -906,7 +906,7 @@ function viewLibrary() {
                 const focus = focusSet.has(bl);
                 return `<tr class="clickable" data-action="open-keyword" data-id="${k.id}">
                   <td class="kw-cell"><div class="main">${esc(k.keyword)}</div></td>
-                  <td class="tr-cell">${k.translation ? esc(k.translation) : '<span class="muted sm">待翻译</span>'}</td>
+                  <td class="tr-cell">${esc(k.translation || k.keyword)}</td>
                   <td>${esc(k.brand || "—")}${focus ? ' <span class="badge new">重点</span>' : ""}</td>
                   <td>${esc(k.categoryWord || "—")}</td>
                   <td>${tagsChipsHtml(k)}</td>
@@ -1070,7 +1070,7 @@ function viewUpdate() {
                     <div class="main">${esc(r.searchTerm)}${r.isNew ? '<span class="tag">新词</span>' : ""}</div>
                     <div class="sub">${esc((r.reasons || []).join("；"))}</div>
                   </td>
-                  <td class="tr-cell">${r.translation ? esc(r.translation) : '<span class="muted sm">—</span>'}</td>
+                  <td class="tr-cell">${esc(r.translation || r.searchTerm)}</td>
                   <td>${r.matchedPhrase ? `<span class="badge up">命中词库</span> <span class="muted">${esc(r.matchedPhrase)}</span>` : '<span class="muted">未收录</span>'}</td>
                   <td class="num">${fmt(r.rank)}</td>
                   <td class="num">${r.xiyou ? (r.xiyou.volume != null ? fmt(r.xiyou.volume) : '<span class="muted sm">无数据</span>') : d.autoMatchJobId ? '<span class="muted sm">对接中…</span>' : '<span class="muted sm">—</span>'}</td>
