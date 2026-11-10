@@ -260,7 +260,7 @@ async function api(path, options = {}) {
   return fetchStateWithProgress();
 }
 
-const STATE_KEY = "hnStateCacheEU-af59434e679c";
+const STATE_KEY = "hnStateCacheEU-ad65ff95b4de";
 
 function openStateDb() {
   return new Promise((resolve, reject) => {
@@ -1639,7 +1639,7 @@ function bulkSelectedApply() {
   render();
 }
 
-const TEAM_LINK_URL = "https://Mlhz083922.github.io/hn-search-terms-tracking/";
+const TEAM_LINK_URL = "https://Mlhz083922.github.io/hn-search-terms-tracking-eu/";
 
 function ensureTeamProgress() {
   let box = $("#team-update-progress");
